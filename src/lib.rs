@@ -480,7 +480,7 @@ pub trait HasContext {
         program: Self::Program,
         uniform_block_index: u32,
         parameter: u32,
-        out: &mut [i32]
+        out: &mut [i32],
     );
 
     unsafe fn get_active_uniform_block_name(
@@ -1132,6 +1132,15 @@ pub trait HasContext {
         layer: i32,
         access: u32,
         format: u32,
+    );
+
+    unsafe fn clear_image_texture(
+        &self,
+        texture: Self::Texture,
+        level: i32,
+        format: u32,
+        element_type: u32,
+        data: &[u8],
     );
 }
 
