@@ -4,10 +4,10 @@ use js_sys::{self, Array};
 use slotmap::{new_key_type, SlotMap};
 use std::cell::RefCell;
 use web_sys::{
-    self, HtmlCanvasElement, HtmlImageElement, ImageBitmap, WebGl2RenderingContext, WebGlBuffer,
-    WebGlFramebuffer, WebGlProgram, WebGlQuery, WebGlRenderbuffer, WebGlRenderingContext,
-    WebGlSampler, WebGlShader, WebGlSync, WebGlTexture, WebGlTransformFeedback,
-    WebGlUniformLocation, WebGlVertexArrayObject,
+    self, HtmlCanvasElement, HtmlImageElement, HtmlVideoElement, ImageBitmap,
+    WebGl2RenderingContext, WebGlBuffer, WebGlFramebuffer, WebGlProgram, WebGlQuery,
+    WebGlRenderbuffer, WebGlRenderingContext, WebGlSampler, WebGlShader, WebGlSync, WebGlTexture,
+    WebGlTransformFeedback, WebGlUniformLocation, WebGlVertexArrayObject,
 };
 
 #[derive(Debug)]
@@ -16,6 +16,7 @@ enum RawRenderingContext {
     WebGl2(WebGl2RenderingContext),
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct Extensions {
     pub angle_instanced_arrays: Option<web_sys::AngleInstancedArrays>,
@@ -40,7 +41,7 @@ struct Extensions {
     pub oes_texture_half_float: Option<web_sys::OesTextureHalfFloat>,
     pub oes_texture_half_float_linear: Option<web_sys::OesTextureHalfFloatLinear>,
     pub oes_vertex_array_object: Option<web_sys::OesVertexArrayObject>,
-    pub ovr_multiview2: Option<()>,
+    pub ovr_multiview2: Option<web_sys::OvrMultiview2>,
     pub webgl_color_buffer_float: Option<web_sys::WebglColorBufferFloat>,
     pub webgl_compressed_texture_astc: Option<web_sys::WebglCompressedTextureAstc>,
     pub webgl_compressed_texture_etc: Option<web_sys::WebglCompressedTextureEtc>,
@@ -65,6 +66,7 @@ fn tracked_resource<K: slotmap::Key, V>() -> TrackedResource<K, V> {
 pub struct Context {
     raw: RawRenderingContext,
     extensions: Extensions,
+    version: Version,
     supported_extensions: HashSet<String>,
     shaders: TrackedResource<WebShaderKey, WebGlShader>,
     programs: TrackedResource<WebProgramKey, WebGlProgram>,
@@ -180,7 +182,7 @@ macro_rules! build_extensions {
                 &$context,
                 "OES_vertex_array_object",
             ),
-            ovr_multiview2: get_extension_no_object(&$context, "OVR_multiview2"),
+            ovr_multiview2: get_extension::<web_sys::OvrMultiview2>(&$context, "OVR_multiview2"),
             webgl_color_buffer_float: get_extension::<web_sys::WebglColorBufferFloat>(
                 &$context,
                 "WEBGL_color_buffer_float",
@@ -246,10 +248,16 @@ macro_rules! build_extensions {
 impl Context {
     pub fn from_webgl1_context(context: WebGlRenderingContext) -> Self {
         let (extensions, supported_extensions) = build_extensions!(context, WebGlRenderingContext);
+
+        // Retrieve and parse `GL_VERSION`
+        let raw_string = context.get_parameter(VERSION).unwrap().as_string().unwrap();
+        let version = Version::parse(&raw_string).unwrap();
+
         Self {
             raw: RawRenderingContext::WebGl1(context),
             extensions,
             supported_extensions,
+            version,
             shaders: tracked_resource(),
             programs: tracked_resource(),
             buffers: tracked_resource(),
@@ -266,10 +274,16 @@ impl Context {
 
     pub fn from_webgl2_context(context: WebGl2RenderingContext) -> Self {
         let (extensions, supported_extensions) = build_extensions!(context, WebGl2RenderingContext);
+
+        // Retrieve and parse `GL_VERSION`
+        let raw_string = context.get_parameter(VERSION).unwrap().as_string().unwrap();
+        let version = Version::parse(&raw_string).unwrap();
+
         Self {
             raw: RawRenderingContext::WebGl2(context),
             extensions,
             supported_extensions,
+            version,
             shaders: tracked_resource(),
             programs: tracked_resource(),
             buffers: tracked_resource(),
@@ -284,42 +298,11 @@ impl Context {
         }
     }
 
-    pub unsafe fn tex_image_2d_with_html_image(
-        &self,
-        target: u32,
-        level: i32,
-        internal_format: i32,
-        format: u32,
-        ty: u32,
-        image: &HtmlImageElement,
-    ) {
-        match self.raw {
-            RawRenderingContext::WebGl1(ref gl) => {
-                // TODO: Handle return value?
-                gl.tex_image_2d_with_u32_and_u32_and_image(
-                    target,
-                    level,
-                    internal_format,
-                    format,
-                    ty,
-                    image,
-                )
-                .unwrap();
-            }
-            RawRenderingContext::WebGl2(ref gl) => {
-                // TODO: Handle return value?
-                gl.tex_image_2d_with_u32_and_u32_and_html_image_element(
-                    target,
-                    level,
-                    internal_format,
-                    format,
-                    ty,
-                    image,
-                )
-                .unwrap();
-            }
-        }
-    }
+    // These functions are defined in this order:
+    //
+    // - image_bitmap
+    // - html_canvas
+    // - html_image
 
     pub unsafe fn tex_image_2d_with_image_bitmap(
         &self,
@@ -395,6 +378,132 @@ impl Context {
         }
     }
 
+    pub unsafe fn tex_image_2d_with_html_image(
+        &self,
+        target: u32,
+        level: i32,
+        internal_format: i32,
+        format: u32,
+        ty: u32,
+        image: &HtmlImageElement,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(ref gl) => {
+                // TODO: Handle return value?
+                gl.tex_image_2d_with_u32_and_u32_and_image(
+                    target,
+                    level,
+                    internal_format,
+                    format,
+                    ty,
+                    image,
+                )
+                .unwrap();
+            }
+            RawRenderingContext::WebGl2(ref gl) => {
+                // TODO: Handle return value?
+                gl.tex_image_2d_with_u32_and_u32_and_html_image_element(
+                    target,
+                    level,
+                    internal_format,
+                    format,
+                    ty,
+                    image,
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    pub unsafe fn tex_image_2d_with_html_video(
+        &self,
+        target: u32,
+        level: i32,
+        internal_format: i32,
+        format: u32,
+        ty: u32,
+        video: &HtmlVideoElement,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(ref gl) => {
+                // TODO: Handle return value?
+                gl.tex_image_2d_with_u32_and_u32_and_video(
+                    target,
+                    level,
+                    internal_format,
+                    format,
+                    ty,
+                    video,
+                )
+                .unwrap();
+            }
+            RawRenderingContext::WebGl2(ref gl) => {
+                // TODO: Handle return value?
+                gl.tex_image_2d_with_u32_and_u32_and_html_video_element(
+                    target,
+                    level,
+                    internal_format,
+                    format,
+                    ty,
+                    video,
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    pub unsafe fn tex_sub_image_2d_with_image_bitmap(
+        &self,
+        target: u32,
+        level: i32,
+        x_offset: i32,
+        y_offset: i32,
+        format: u32,
+        ty: u32,
+        image: &ImageBitmap,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(ref gl) => {
+                gl.tex_sub_image_2d_with_u32_and_u32_and_image_bitmap(
+                    target, level, x_offset, y_offset, format, ty, image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.tex_sub_image_2d_with_u32_and_u32_and_image_bitmap(
+                    target, level, x_offset, y_offset, format, ty, image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+        }
+    }
+
+    pub unsafe fn tex_sub_image_2d_with_html_canvas(
+        &self,
+        target: u32,
+        level: i32,
+        x_offset: i32,
+        y_offset: i32,
+        format: u32,
+        ty: u32,
+        image: &HtmlCanvasElement,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(ref gl) => {
+                gl.tex_sub_image_2d_with_u32_and_u32_and_canvas(
+                    target, level, x_offset, y_offset, format, ty, image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.tex_sub_image_2d_with_u32_and_u32_and_html_canvas_element(
+                    target, level, x_offset, y_offset, format, ty, image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+        }
+    }
+
     pub unsafe fn tex_sub_image_2d_with_html_image(
         &self,
         target: u32,
@@ -418,6 +527,220 @@ impl Context {
                 )
                 .unwrap(); // TODO: Handle return value?
             }
+        }
+    }
+
+    pub unsafe fn tex_image_3d_with_image_bitmap(
+        &self,
+        target: u32,
+        level: i32,
+        internal_format: i32,
+        width: i32,
+        height: i32,
+        depth: i32,
+        border: i32,
+        format: u32,
+        ty: u32,
+        image: &ImageBitmap,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(_) => panic!("3D images not supported"),
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.tex_image_3d_with_image_bitmap(
+                    target,
+                    level,
+                    internal_format,
+                    width,
+                    height,
+                    depth,
+                    border,
+                    format,
+                    ty,
+                    image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+        }
+    }
+
+    pub unsafe fn tex_image_3d_with_html_canvas_element(
+        &self,
+        target: u32,
+        level: i32,
+        internal_format: i32,
+        width: i32,
+        height: i32,
+        depth: i32,
+        border: i32,
+        format: u32,
+        ty: u32,
+        image: &HtmlCanvasElement,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(_) => panic!("3D images not supported"),
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.tex_image_3d_with_html_canvas_element(
+                    target,
+                    level,
+                    internal_format,
+                    width,
+                    height,
+                    depth,
+                    border,
+                    format,
+                    ty,
+                    image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+        }
+    }
+
+    pub unsafe fn tex_image_3d_with_html_image_element(
+        &self,
+        target: u32,
+        level: i32,
+        internal_format: i32,
+        width: i32,
+        height: i32,
+        depth: i32,
+        border: i32,
+        format: u32,
+        ty: u32,
+        image: &HtmlImageElement,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(_) => panic!("3D images not supported"),
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.tex_image_3d_with_html_image_element(
+                    target,
+                    level,
+                    internal_format,
+                    width,
+                    height,
+                    depth,
+                    border,
+                    format,
+                    ty,
+                    image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+        }
+    }
+
+    pub unsafe fn tex_sub_image_3d_with_image_bitmap(
+        &self,
+        target: u32,
+        level: i32,
+        x_offset: i32,
+        y_offset: i32,
+        z_offset: i32,
+        width: i32,
+        height: i32,
+        depth: i32,
+        format: u32,
+        ty: u32,
+        image: &ImageBitmap,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(_) => panic!("3D images not supported"),
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.tex_sub_image_3d_with_image_bitmap(
+                    target, level, x_offset, y_offset, z_offset, width, height, depth, format, ty,
+                    image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+        }
+    }
+
+    pub unsafe fn tex_sub_image_3d_with_html_canvas_element(
+        &self,
+        target: u32,
+        level: i32,
+        x_offset: i32,
+        y_offset: i32,
+        z_offset: i32,
+        width: i32,
+        height: i32,
+        depth: i32,
+        format: u32,
+        ty: u32,
+        image: &HtmlCanvasElement,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(_) => panic!("3D images not supported"),
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.tex_sub_image_3d_with_html_canvas_element(
+                    target, level, x_offset, y_offset, z_offset, width, height, depth, format, ty,
+                    image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+        }
+    }
+
+    pub unsafe fn tex_sub_image_3d_with_html_image_element(
+        &self,
+        target: u32,
+        level: i32,
+        x_offset: i32,
+        y_offset: i32,
+        z_offset: i32,
+        width: i32,
+        height: i32,
+        depth: i32,
+        format: u32,
+        ty: u32,
+        image: &HtmlImageElement,
+    ) {
+        match self.raw {
+            RawRenderingContext::WebGl1(_) => panic!("3D images not supported"),
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.tex_sub_image_3d_with_html_image_element(
+                    target, level, x_offset, y_offset, z_offset, width, height, depth, format, ty,
+                    image,
+                )
+                .unwrap(); // TODO: Handle return value?
+            }
+        }
+    }
+
+    pub unsafe fn framebuffer_texture_multiview_ovr(
+        &self,
+        target: u32,
+        attachment: u32,
+        texture: Option<<Self as HasContext>::Texture>,
+        level: i32,
+        base_view_index: i32,
+        num_views: i32,
+    ) {
+        let textures = self.textures.borrow();
+        let raw_texture = texture.map(|t| textures.get_unchecked(t));
+        match self.raw {
+            RawRenderingContext::WebGl1(ref _gl) => {
+                panic!("OVR_multiview2 is not supported in WebGL1")
+            }
+            RawRenderingContext::WebGl2(ref _gl) => {
+                if let Some(ext) = &self.extensions.ovr_multiview2 {
+                    ext.framebuffer_texture_multiview_ovr(
+                        target,
+                        attachment,
+                        raw_texture,
+                        level,
+                        base_view_index,
+                        num_views,
+                    );
+                }
+            }
+        }
+    }
+
+    pub unsafe fn bind_external_framebuffer(&self, target: u32, framebuffer: &WebGlFramebuffer) {
+        match self.raw {
+            RawRenderingContext::WebGl1(ref gl) => gl.bind_framebuffer(target, Some(framebuffer)),
+            RawRenderingContext::WebGl2(ref gl) => gl.bind_framebuffer(target, Some(framebuffer)),
         }
     }
 }
@@ -454,6 +777,10 @@ impl HasContext for Context {
 
     fn supports_debug(&self) -> bool {
         false
+    }
+
+    fn version(&self) -> &Version {
+        &self.version
     }
 
     unsafe fn create_framebuffer(&self) -> Result<Self::Framebuffer, String> {
@@ -584,6 +911,10 @@ impl HasContext for Context {
         }
     }
 
+    unsafe fn create_named_texture(&self, _target: u32) -> Result<Self::Texture, String> {
+        unimplemented!()
+    }
+
     unsafe fn is_texture(&self, texture: Self::Texture) -> bool {
         let textures = self.textures.borrow_mut();
         if let Some(ref t) = textures.get(texture) {
@@ -622,6 +953,24 @@ impl HasContext for Context {
             RawRenderingContext::WebGl1(ref gl) => gl.compile_shader(raw_shader),
             RawRenderingContext::WebGl2(ref gl) => gl.compile_shader(raw_shader),
         }
+    }
+
+    unsafe fn get_shader_completion_status(&self, shader: Self::Shader) -> bool {
+        let shaders = self.shaders.borrow();
+        let raw_shader = shaders.get_unchecked(shader);
+        if self.extensions.khr_parallel_shader_compile.is_none() {
+            panic!("Parallel shader compile is not supported")
+        }
+        match self.raw {
+            RawRenderingContext::WebGl1(ref gl) => {
+                gl.get_shader_parameter(raw_shader, COMPLETION_STATUS)
+            }
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.get_shader_parameter(raw_shader, COMPLETION_STATUS)
+            }
+        }
+        .as_bool()
+        .unwrap_or(false)
     }
 
     unsafe fn get_shader_compile_status(&self, shader: Self::Shader) -> bool {
@@ -728,6 +1077,24 @@ impl HasContext for Context {
         }
     }
 
+    unsafe fn get_program_completion_status(&self, program: Self::Program) -> bool {
+        let programs = self.programs.borrow();
+        let raw_program = programs.get_unchecked(program);
+        if self.extensions.khr_parallel_shader_compile.is_none() {
+            panic!("Parallel shader compile is not supported")
+        }
+        match self.raw {
+            RawRenderingContext::WebGl1(ref gl) => {
+                gl.get_program_parameter(raw_program, COMPLETION_STATUS)
+            }
+            RawRenderingContext::WebGl2(ref gl) => {
+                gl.get_program_parameter(raw_program, COMPLETION_STATUS)
+            }
+        }
+        .as_bool()
+        .unwrap_or(false)
+    }
+
     unsafe fn get_program_link_status(&self, program: Self::Program) -> bool {
         let programs = self.programs.borrow();
         let raw_program = programs.get_unchecked(program);
@@ -818,6 +1185,10 @@ impl HasContext for Context {
             }
             None => Err(String::from("Unable to create buffer object")),
         }
+    }
+
+    unsafe fn create_named_buffer(&self) -> Result<Self::Buffer, String> {
+        unimplemented!()
     }
 
     unsafe fn is_buffer(&self, buffer: Self::Buffer) -> bool {
@@ -1057,6 +1428,10 @@ impl HasContext for Context {
         }
     }
 
+    unsafe fn named_buffer_data_u8_slice(&self, _buffer: Self::Buffer, _data: &[u8], _usage: u32) {
+        unimplemented!()
+    }
+
     unsafe fn buffer_sub_data_u8_slice(&self, target: u32, offset: i32, src_data: &[u8]) {
         match self.raw {
             RawRenderingContext::WebGl1(ref gl) => {
@@ -1178,6 +1553,27 @@ impl HasContext for Context {
                     src_target, dst_target, src_offset, dst_offset, size,
                 ),
         }
+    }
+
+    unsafe fn copy_image_sub_data(
+        &self,
+        _src_name: Self::Texture,
+        _src_target: u32,
+        _src_level: i32,
+        _src_x: i32,
+        _src_y: i32,
+        _src_z: i32,
+        _dst_name: Self::Texture,
+        _dst_target: u32,
+        _dst_level: i32,
+        _dst_x: i32,
+        _dst_y: i32,
+        _dst_z: i32,
+        _src_width: i32,
+        _src_height: i32,
+        _src_depth: i32,
+    ) {
+        unimplemented!()
     }
 
     unsafe fn copy_tex_image_2d(
@@ -1514,6 +1910,10 @@ impl HasContext for Context {
 
     unsafe fn enable_draw_buffer(&self, _parameter: u32, _draw_buffer: u32) {
         panic!("Draw buffer enable is not supported");
+    }
+
+    unsafe fn enable_vertex_array_attrib(&self, _vao: Self::VertexArray, _index: u32) {
+        unimplemented!()
     }
 
     unsafe fn enable_vertex_attrib_array(&self, index: u32) {
@@ -1940,6 +2340,10 @@ impl HasContext for Context {
                 gl.generate_mipmap(target);
             }
         }
+    }
+
+    unsafe fn generate_texture_mipmap(&self, _texture: Self::Texture) {
+        unimplemented!()
     }
 
     unsafe fn tex_image_1d(
@@ -2707,6 +3111,10 @@ impl HasContext for Context {
         }
     }
 
+    unsafe fn texture_parameter_i32(&self, _texture: Self::Texture, _parameter: u32, _value: i32) {
+        unimplemented!()
+    }
+
     unsafe fn tex_parameter_f32_slice(&self, _target: u32, _parameter: u32, _values: &[f32]) {
         // Blocked by https://github.com/rustwasm/wasm-bindgen/issues/1038
         panic!("Texture parameters for `&[f32]` are not supported yet");
@@ -2767,6 +3175,23 @@ impl HasContext for Context {
                 .unwrap(); // TODO: Handle return value?
             }
         }
+    }
+
+    unsafe fn texture_sub_image_3d(
+        &self,
+        _texture: Self::Texture,
+        _level: i32,
+        _x_offset: i32,
+        _y_offset: i32,
+        _z_offset: i32,
+        _width: i32,
+        _height: i32,
+        _depth: i32,
+        _format: u32,
+        _ty: u32,
+        _pixels: PixelUnpackData,
+    ) {
+        unimplemented!()
     }
 
     unsafe fn compressed_tex_sub_image_2d(
@@ -2944,6 +3369,57 @@ impl HasContext for Context {
 
     unsafe fn scissor_slice(&self, _first: u32, _count: i32, _scissors: &[[i32; 4]]) {
         panic!("Scissor slice is not supported");
+    }
+
+    unsafe fn vertex_array_attrib_binding_f32(
+        &self,
+        _vao: Self::VertexArray,
+        _index: u32,
+        _binding_index: u32,
+    ) {
+        unimplemented!()
+    }
+
+    unsafe fn vertex_array_attrib_format_f32(
+        &self,
+        _vao: Self::VertexArray,
+        _index: u32,
+        _size: i32,
+        _data_type: u32,
+        _normalized: bool,
+        _relative_offset: u32,
+    ) {
+        unimplemented!()
+    }
+
+    unsafe fn vertex_array_attrib_format_i32(
+        &self,
+        _vao: Self::VertexArray,
+        _index: u32,
+        _size: i32,
+        _data_type: u32,
+        _relative_offset: u32,
+    ) {
+        unimplemented!()
+    }
+
+    unsafe fn vertex_array_element_buffer(
+        &self,
+        _vao: Self::VertexArray,
+        _buffer: Option<Self::Buffer>,
+    ) {
+        unimplemented!()
+    }
+
+    unsafe fn vertex_array_vertex_buffer(
+        &self,
+        _vao: Self::VertexArray,
+        _binding_index: u32,
+        _buffer: Option<Self::Buffer>,
+        _offset: i32,
+        _stride: i32,
+    ) {
+        unimplemented!()
     }
 
     unsafe fn vertex_attrib_divisor(&self, index: u32, divisor: u32) {
@@ -3365,7 +3841,7 @@ impl HasContext for Context {
     ) {
         match pixels {
             PixelPackData::BufferOffset(offset) => match self.raw {
-                RawRenderingContext::WebGl1(ref gl) => {
+                RawRenderingContext::WebGl1(ref _gl) => {
                     panic!("Read pixels into buffer offset is not supported")
                 }
                 RawRenderingContext::WebGl2(ref gl) => gl
@@ -3400,6 +3876,18 @@ impl HasContext for Context {
                 }
             }
         }
+    }
+
+    unsafe fn texture_storage_3d(
+        &self,
+        _texture: Self::Texture,
+        _levels: i32,
+        _internal_format: u32,
+        _width: i32,
+        _height: i32,
+        _depth: i32,
+    ) {
+        unimplemented!()
     }
 
     unsafe fn get_uniform_i32(
@@ -3698,6 +4186,10 @@ impl HasContext for Context {
                 .get_active_uniform_block_name(raw_program, uniform_block_index)
                 .unwrap(),
         }
+    }
+
+    unsafe fn max_shader_compiler_threads(&self, _count: u32) {
+        // WebGL doesn't use this
     }
 }
 

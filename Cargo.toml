@@ -1,6 +1,6 @@
 [package]
 name = "glow"
-version = "0.11.0"
+version = "0.11.2"
 description = "GL on Whatever: a set of bindings to run GL (Open GL, OpenGL ES, and WebGL) anywhere, and avoid target-specific code."
 authors = [
   "Joshua Groves <josh@joshgroves.com>",
@@ -26,19 +26,27 @@ targets = [
 name = "glow"
 path = "src/lib.rs"
 
+[dependencies]
+log = { version = "0.4.16", optional = true }
+
+[features]
+debug_trace_calls = []
+debug_automatic_glGetError = []
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "~0.3"
 wasm-bindgen = "~0.2"
 slotmap = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.web_sys]
-version = "~0.3.37"
+version = "~0.3.58"
 package = "web-sys"
 features = [
   "Document",
   "Element",
   "HtmlCanvasElement",
   "HtmlImageElement",
+  "HtmlVideoElement",
   "ImageBitmap",
   "WebGlActiveInfo",
   "WebGlBuffer",
@@ -85,6 +93,7 @@ features = [
   "WebglDepthTexture",
   "WebglDrawBuffers",
   "WebglLoseContext",
+  "OvrMultiview2",
 ]
 
 [workspace]

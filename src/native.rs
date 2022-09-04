@@ -12,37 +12,44 @@ pub struct Context {
     raw: native_gl::GlFns,
     extensions: HashSet<String>,
     constants: Constants,
+    version: Version,
 }
 
 impl Context {
-    pub unsafe fn from_loader_function<F>(mut loader_function: F) -> Self
+    pub unsafe fn from_loader_function_cstr<F>(mut loader_function: F) -> Self
     where
-        F: FnMut(&str) -> *const std::os::raw::c_void,
+        F: FnMut(&CStr) -> *const std::os::raw::c_void,
     {
-        // Note(Lokathor): This is wildly inefficient, because the loader_function
-        // is doubtlessly just going to allocate the `&str` we pass into a new `CString`
-        // so that it can pass that `*const c_char` off to the OS's actual loader.
-        // However, this is the best we can do without changing the outer function
-        // signature into something that's less alloc crazy.
         let raw: native_gl::GlFns =
             native_gl::GlFns::load_with(|p: *const std::os::raw::c_char| {
                 let c_str = std::ffi::CStr::from_ptr(p);
-                loader_function(c_str.to_str().unwrap()) as *mut std::os::raw::c_void
+                loader_function(c_str) as *mut std::os::raw::c_void
             });
+
+        // Retrieve and parse `GL_VERSION`
+        let raw_string = raw.GetString(VERSION);
+
+        if raw_string.is_null() {
+            panic!("Reading GL_VERSION failed. Make sure there is a valid GL context currently active.")
+        }
+
+        let raw_version = std::ffi::CStr::from_ptr(raw_string as *const native_gl::GLchar)
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let version = Version::parse(&raw_version).unwrap();
 
         // Setup extensions and constants after the context has been built
         let mut context = Self {
             raw,
             extensions: HashSet::new(),
             constants: Constants::default(),
+            version,
         };
 
-        let raw_version = context.get_parameter_string(VERSION);
-        let version = Version::parse(&raw_version).unwrap();
-
         // Use core-only functions to populate extension list
-        if (version >= Version::new(3, 0, None, String::from("")))
-            || (version >= Version::new_embedded(3, 0, String::from("")))
+        if (context.version >= Version::new(3, 0, None, String::from("")))
+            || (context.version >= Version::new_embedded(3, 0, String::from("")))
         {
             let num_extensions = context.get_parameter_i32(NUM_EXTENSIONS);
             for i in 0..num_extensions {
@@ -69,6 +76,31 @@ impl Context {
 
         context
     }
+
+    pub unsafe fn from_loader_function<F>(mut loader_function: F) -> Self
+    where
+        F: FnMut(&str) -> *const std::os::raw::c_void,
+    {
+        Self::from_loader_function_cstr(move |name| {
+            loader_function(name.to_str().unwrap())
+        })
+    }
+
+    /// Creates a texture from an external GL name.
+    ///
+    /// This can be useful when a texture is created outside of glow (e.g. OpenXR surface) but glow
+    /// still needs access to it for rendering.
+    pub unsafe fn create_texture_from_gl_name(gl_name: native_gl::GLuint) -> NativeTexture {
+        NativeTexture(non_zero_gl_name(gl_name))
+    }
+
+    /// Creates a framebuffer from an external GL name.
+    ///
+    /// This can be useful when a framebuffer is created outside of glow (e.g: via `surfman` or another
+    /// crate that supports sharing of buffers between GL contexts), but glow needs to set it as a target.
+    pub unsafe fn create_framebuffer_from_gl_name(gl_name: native_gl::GLuint) -> NativeFramebuffer {
+        NativeFramebuffer(non_zero_gl_name(gl_name))
+    }
 }
 
 impl std::fmt::Debug for Context {
@@ -82,40 +114,40 @@ fn non_zero_gl_name(value: native_gl::GLuint) -> NonZeroU32 {
 }
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeShader(NonZeroU32);
+pub struct NativeShader(pub NonZeroU32);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeProgram(NonZeroU32);
+pub struct NativeProgram(pub NonZeroU32);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeBuffer(NonZeroU32);
+pub struct NativeBuffer(pub NonZeroU32);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeVertexArray(NonZeroU32);
+pub struct NativeVertexArray(pub NonZeroU32);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeTexture(NonZeroU32);
+pub struct NativeTexture(pub NonZeroU32);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeSampler(NonZeroU32);
+pub struct NativeSampler(pub NonZeroU32);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeFence(native_gl::GLsync);
+pub struct NativeFence(pub native_gl::GLsync);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeFramebuffer(NonZeroU32);
+pub struct NativeFramebuffer(pub NonZeroU32);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeRenderbuffer(NonZeroU32);
+pub struct NativeRenderbuffer(pub NonZeroU32);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeQuery(NonZeroU32);
+pub struct NativeQuery(pub NonZeroU32);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeUniformLocation(native_gl::GLuint);
+pub struct NativeUniformLocation(pub native_gl::GLuint);
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NativeTransformFeedback(NonZeroU32);
+pub struct NativeTransformFeedback(pub NonZeroU32);
 
 impl HasContext for Context {
     type Shader = NativeShader;
@@ -137,6 +169,10 @@ impl HasContext for Context {
 
     fn supports_debug(&self) -> bool {
         self.extensions.contains("GL_KHR_debug")
+    }
+
+    fn version(&self) -> &Version {
+        &self.version
     }
 
     unsafe fn create_framebuffer(&self) -> Result<Self::Framebuffer, String> {
@@ -196,6 +232,13 @@ impl HasContext for Context {
         Ok(NativeTexture(non_zero_gl_name(name)))
     }
 
+    unsafe fn create_named_texture(&self, target: u32) -> Result<Self::Texture, String> {
+        let gl = &self.raw;
+        let mut name = 0;
+        gl.CreateTextures(target, 1, &mut name);
+        Ok(NativeTexture(non_zero_gl_name(name)))
+    }
+    
     unsafe fn is_texture(&self, texture: Self::Texture) -> bool {
         let gl = &self.raw;
         gl.IsTexture(texture.0.get()) != 0
@@ -219,6 +262,13 @@ impl HasContext for Context {
     unsafe fn compile_shader(&self, shader: Self::Shader) {
         let gl = &self.raw;
         gl.CompileShader(shader.0.get());
+    }
+
+    unsafe fn get_shader_completion_status(&self, shader: Self::Shader) -> bool {
+        let gl = &self.raw;
+        let mut status = 0;
+        gl.GetShaderiv(shader.0.get(), COMPLETION_STATUS, &mut status);
+        1 == status
     }
 
     unsafe fn get_shader_compile_status(&self, shader: Self::Shader) -> bool {
@@ -299,6 +349,13 @@ impl HasContext for Context {
         gl.LinkProgram(program.0.get());
     }
 
+    unsafe fn get_program_completion_status(&self, program: Self::Program) -> bool {
+        let gl = &self.raw;
+        let mut status = 0;
+        gl.GetProgramiv(program.0.get(), COMPLETION_STATUS, &mut status);
+        1 == status
+    }
+
     unsafe fn get_program_link_status(&self, program: Self::Program) -> bool {
         let gl = &self.raw;
         let mut status = 0;
@@ -377,6 +434,13 @@ impl HasContext for Context {
         Ok(NativeBuffer(non_zero_gl_name(buffer)))
     }
 
+    unsafe fn create_named_buffer(&self) -> Result<Self::Buffer, String> {
+        let gl = &self.raw;
+        let mut buffer = 0;
+        gl.CreateBuffers(1, &mut buffer);
+        Ok(NativeBuffer(non_zero_gl_name(buffer)))
+    }
+    
     unsafe fn is_buffer(&self, buffer: Self::Buffer) -> bool {
         let gl = &self.raw;
         gl.IsBuffer(buffer.0.get()) != 0
@@ -546,6 +610,16 @@ impl HasContext for Context {
         );
     }
 
+    unsafe fn named_buffer_data_u8_slice(&self, buffer: Self::Buffer, data: &[u8], usage: u32) {
+        let gl = &self.raw;
+        gl.NamedBufferData(
+            buffer.0.get(),
+            data.len() as isize,
+            data.as_ptr() as *const std::ffi::c_void,
+            usage,
+        );
+    }
+    
     unsafe fn buffer_sub_data_u8_slice(&self, target: u32, offset: i32, src_data: &[u8]) {
         let gl = &self.raw;
         gl.BufferSubData(
@@ -636,6 +710,44 @@ impl HasContext for Context {
         );
     }
 
+    unsafe fn copy_image_sub_data(
+        &self,
+        src_name: Self::Texture,
+        src_target: u32,
+        src_level: i32,
+        src_x: i32,
+        src_y: i32,
+        src_z: i32,
+        dst_name: Self::Texture,
+        dst_target: u32,
+        dst_level: i32,
+        dst_x: i32,
+        dst_y: i32,
+        dst_z: i32,
+        src_width: i32,
+        src_height: i32,
+        src_depth: i32,
+    ) {
+        let gl = &self.raw;
+        gl.CopyImageSubData(
+            src_name.0.get(),
+            src_target,
+            src_level,
+            src_x,
+            src_y,
+            src_z,
+            dst_name.0.get(),
+            dst_target,
+            dst_level,
+            dst_x,
+            dst_y,
+            dst_z,
+            src_width,
+            src_height,
+            src_depth,
+        );
+    }
+    
     unsafe fn copy_tex_image_2d(
         &self,
         target: u32,
@@ -893,6 +1005,11 @@ impl HasContext for Context {
     unsafe fn enable_draw_buffer(&self, parameter: u32, draw_buffer: u32) {
         let gl = &self.raw;
         gl.Enablei(parameter, draw_buffer);
+    }
+
+    unsafe fn enable_vertex_array_attrib(&self, vao: Self::VertexArray, index: u32) {
+        let gl = &self.raw;
+        gl.EnableVertexArrayAttrib(vao.0.get(), index);
     }
 
     unsafe fn enable_vertex_attrib_array(&self, index: u32) {
@@ -1205,6 +1322,11 @@ impl HasContext for Context {
         gl.GenerateMipmap(target);
     }
 
+    unsafe fn generate_texture_mipmap(&self, texture: Self::Texture) {
+        let gl = &self.raw;
+        gl.GenerateTextureMipmap(texture.0.get());
+    }
+
     unsafe fn tex_image_1d(
         &self,
         target: u32,
@@ -1425,6 +1547,26 @@ impl HasContext for Context {
         gl.TexStorage3D(target, levels, internal_format, width, height, depth);
     }
 
+    unsafe fn texture_storage_3d(
+        &self,
+        texture: Self::Texture,
+        levels: i32,
+        internal_format: u32,
+        width: i32,
+        height: i32,
+        depth: i32,
+    ) {
+        let gl = &self.raw;
+        gl.TextureStorage3D(
+            texture.0.get(),
+            levels,
+            internal_format,
+            width,
+            height,
+            depth,
+        );
+    }
+    
     unsafe fn get_uniform_i32(
         &self,
         program: Self::Program,
@@ -1824,6 +1966,11 @@ impl HasContext for Context {
         gl.TexParameteri(target, parameter, value);
     }
 
+    unsafe fn texture_parameter_i32(&self, texture: Self::Texture, parameter: u32, value: i32) {
+        let gl = &self.raw;
+        gl.TextureParameteri(texture.0.get(), parameter, value);
+    }
+    
     unsafe fn tex_parameter_f32_slice(&self, target: u32, parameter: u32, values: &[f32]) {
         let gl = &self.raw;
         gl.TexParameterfv(target, parameter, values.as_ptr());
@@ -1923,6 +2070,39 @@ impl HasContext for Context {
         );
     }
 
+    unsafe fn texture_sub_image_3d(
+        &self,
+        texture: Self::Texture,
+        level: i32,
+        x_offset: i32,
+        y_offset: i32,
+        z_offset: i32,
+        width: i32,
+        height: i32,
+        depth: i32,
+        format: u32,
+        ty: u32,
+        pixels: PixelUnpackData,
+    ) {
+        let gl = &self.raw;
+        gl.TextureSubImage3D(
+            texture.0.get(),
+            level,
+            x_offset,
+            y_offset,
+            z_offset,
+            width,
+            height,
+            depth,
+            format,
+            ty,
+            match pixels {
+                PixelUnpackData::BufferOffset(offset) => offset as *const std::ffi::c_void,
+                PixelUnpackData::Slice(data) => data.as_ptr() as *const std::ffi::c_void,
+            },
+        );
+    }
+    
     unsafe fn compressed_tex_sub_image_3d(
         &self,
         target: u32,
@@ -1981,6 +2161,75 @@ impl HasContext for Context {
     unsafe fn scissor_slice(&self, first: u32, count: i32, scissors: &[[i32; 4]]) {
         let gl = &self.raw;
         gl.ScissorArrayv(first, count, scissors.as_ptr() as *const i32);
+    }
+
+    unsafe fn vertex_array_attrib_binding_f32(
+        &self,
+        vao: Self::VertexArray,
+        index: u32,
+        binding_index: u32,
+    ) {
+        let gl = &self.raw;
+        gl.VertexArrayAttribBinding(vao.0.get(), index, binding_index);
+    }
+
+    unsafe fn vertex_array_attrib_format_f32(
+        &self,
+        vao: Self::VertexArray,
+        index: u32,
+        size: i32,
+        data_type: u32,
+        normalized: bool,
+        relative_offset: u32,
+    ) {
+        let gl = &self.raw;
+        gl.VertexArrayAttribFormat(
+            vao.0.get(),
+            index,
+            size,
+            data_type,
+            normalized as u8,
+            relative_offset,
+        );
+    }
+
+    unsafe fn vertex_array_attrib_format_i32(
+        &self,
+        vao: Self::VertexArray,
+        index: u32,
+        size: i32,
+        data_type: u32,
+        relative_offset: u32,
+    ) {
+        let gl = &self.raw;
+        gl.VertexArrayAttribIFormat(vao.0.get(), index, size, data_type, relative_offset);
+    }
+
+    unsafe fn vertex_array_element_buffer(
+        &self,
+        vao: Self::VertexArray,
+        buffer: Option<Self::Buffer>,
+    ) {
+        let gl = &self.raw;
+        gl.VertexArrayElementBuffer(vao.0.get(), buffer.map(|b| b.0.get()).unwrap_or(0));
+    }
+    
+    unsafe fn vertex_array_vertex_buffer(
+        &self,
+        vao: Self::VertexArray,
+        binding_index: u32,
+        buffer: Option<Self::Buffer>,
+        offset: i32,
+        stride: i32,
+    ) {
+        let gl = &self.raw;
+        gl.VertexArrayVertexBuffer(
+            vao.0.get(),
+            binding_index,
+            buffer.map(|b| b.0.get()).unwrap_or(0),
+            offset as isize,
+            stride,
+        );
     }
 
     unsafe fn vertex_attrib_divisor(&self, index: u32, divisor: u32) {
@@ -2749,6 +2998,15 @@ impl HasContext for Context {
             name
         } else {
             String::from("")
+        }
+    }
+
+    unsafe fn max_shader_compiler_threads(&self, count: u32) {
+        let gl = &self.raw;
+        if gl.MaxShaderCompilerThreadsKHR_is_loaded() {
+            gl.MaxShaderCompilerThreadsKHR(count);
+        } else {
+            gl.MaxShaderCompilerThreadsARB(count);
         }
     }
 }

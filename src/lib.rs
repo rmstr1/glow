@@ -10,18 +10,19 @@ use core::hash::Hash;
 use std::collections::HashSet;
 
 mod version;
+pub use version::Version;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))]
 mod native;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))]
 pub use native::*;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(not(target_arch = "wasm32"), target_os = "emscripten"))]
 mod gl46;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
 #[path = "web_sys.rs"]
 mod web;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
 pub use web::*;
 
 pub type Shader = <Context as HasContext>::Shader;
@@ -55,6 +56,7 @@ pub struct ActiveTransformFeedback {
     pub name: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct DebugMessageLogEntry {
     source: u32,
@@ -97,6 +99,8 @@ pub trait HasContext {
 
     fn supports_debug(&self) -> bool;
 
+    fn version(&self) -> &Version;
+
     unsafe fn create_framebuffer(&self) -> Result<Self::Framebuffer, String>;
 
     unsafe fn is_framebuffer(&self, framebuffer: Self::Framebuffer) -> bool;
@@ -115,6 +119,8 @@ pub trait HasContext {
 
     unsafe fn create_texture(&self) -> Result<Self::Texture, String>;
 
+    unsafe fn create_named_texture(&self, target: u32) -> Result<Self::Texture, String>;
+
     unsafe fn is_texture(&self, texture: Self::Texture) -> bool;
 
     unsafe fn delete_shader(&self, shader: Self::Shader);
@@ -122,6 +128,8 @@ pub trait HasContext {
     unsafe fn shader_source(&self, shader: Self::Shader, source: &str);
 
     unsafe fn compile_shader(&self, shader: Self::Shader);
+
+    unsafe fn get_shader_completion_status(&self, shader: Self::Shader) -> bool;
 
     unsafe fn get_shader_compile_status(&self, shader: Self::Shader) -> bool;
 
@@ -148,6 +156,8 @@ pub trait HasContext {
 
     unsafe fn link_program(&self, program: Self::Program);
 
+    unsafe fn get_program_completion_status(&self, program: Self::Program) -> bool;
+
     unsafe fn get_program_link_status(&self, program: Self::Program) -> bool;
 
     unsafe fn get_program_info_log(&self, program: Self::Program) -> String;
@@ -163,6 +173,8 @@ pub trait HasContext {
     unsafe fn use_program(&self, program: Option<Self::Program>);
 
     unsafe fn create_buffer(&self) -> Result<Self::Buffer, String>;
+
+    unsafe fn create_named_buffer(&self) -> Result<Self::Buffer, String>;
 
     unsafe fn is_buffer(&self, buffer: Self::Buffer) -> bool;
 
@@ -235,6 +247,8 @@ pub trait HasContext {
 
     unsafe fn buffer_data_u8_slice(&self, target: u32, data: &[u8], usage: u32);
 
+    unsafe fn named_buffer_data_u8_slice(&self, buffer: Self::Buffer, data: &[u8], usage: u32);
+
     unsafe fn buffer_sub_data_u8_slice(&self, target: u32, offset: i32, src_data: &[u8]);
 
     unsafe fn get_buffer_sub_data(&self, target: u32, offset: i32, dst_data: &mut [u8]);
@@ -267,6 +281,25 @@ pub trait HasContext {
         src_offset: i32,
         dst_offset: i32,
         size: i32,
+    );
+
+    unsafe fn copy_image_sub_data(
+        &self,
+        src_name: Self::Texture,
+        src_target: u32,
+        src_level: i32,
+        src_x: i32,
+        src_y: i32,
+        src_z: i32,
+        dst_name: Self::Texture,
+        dst_target: u32,
+        dst_level: i32,
+        dst_x: i32,
+        dst_y: i32,
+        dst_z: i32,
+        src_width: i32,
+        src_height: i32,
+        src_depth: i32,
     );
 
     unsafe fn copy_tex_image_2d(
@@ -397,6 +430,8 @@ pub trait HasContext {
     unsafe fn is_enabled(&self, parameter: u32) -> bool;
 
     unsafe fn enable_draw_buffer(&self, parameter: u32, draw_buffer: u32);
+
+    unsafe fn enable_vertex_array_attrib(&self, vao: Self::VertexArray, index: u32);
 
     unsafe fn enable_vertex_attrib_array(&self, index: u32);
 
@@ -536,6 +571,8 @@ pub trait HasContext {
 
     unsafe fn generate_mipmap(&self, target: u32);
 
+    unsafe fn generate_texture_mipmap(&self, texture: Self::Texture);
+
     unsafe fn tex_image_1d(
         &self,
         target: u32,
@@ -645,6 +682,16 @@ pub trait HasContext {
     unsafe fn tex_storage_3d(
         &self,
         target: u32,
+        levels: i32,
+        internal_format: u32,
+        width: i32,
+        height: i32,
+        depth: i32,
+    );
+
+    unsafe fn texture_storage_3d(
+        &self,
+        texture: Self::Texture,
         levels: i32,
         internal_format: u32,
         width: i32,
@@ -827,6 +874,8 @@ pub trait HasContext {
 
     unsafe fn tex_parameter_i32(&self, target: u32, parameter: u32, value: i32);
 
+    unsafe fn texture_parameter_i32(&self, texture: Self::Texture, parameter: u32, value: i32);
+
     unsafe fn tex_parameter_f32_slice(&self, target: u32, parameter: u32, values: &[f32]);
 
     unsafe fn tex_parameter_i32_slice(&self, target: u32, parameter: u32, values: &[i32]);
@@ -871,6 +920,21 @@ pub trait HasContext {
         pixels: PixelUnpackData,
     );
 
+    unsafe fn texture_sub_image_3d(
+        &self,
+        texture: Self::Texture,
+        level: i32,
+        x_offset: i32,
+        y_offset: i32,
+        z_offset: i32,
+        width: i32,
+        height: i32,
+        depth: i32,
+        format: u32,
+        ty: u32,
+        pixels: PixelUnpackData,
+    );
+
     unsafe fn compressed_tex_sub_image_3d(
         &self,
         target: u32,
@@ -896,6 +960,47 @@ pub trait HasContext {
     unsafe fn scissor(&self, x: i32, y: i32, width: i32, height: i32);
 
     unsafe fn scissor_slice(&self, first: u32, count: i32, scissors: &[[i32; 4]]);
+
+    unsafe fn vertex_array_attrib_binding_f32(
+        &self,
+        vao: Self::VertexArray,
+        index: u32,
+        binding_index: u32,
+    );
+
+    unsafe fn vertex_array_attrib_format_f32(
+        &self,
+        vao: Self::VertexArray,
+        index: u32,
+        size: i32,
+        data_type: u32,
+        normalized: bool,
+        relative_offset: u32,
+    );
+
+    unsafe fn vertex_array_attrib_format_i32(
+        &self,
+        vao: Self::VertexArray,
+        index: u32,
+        size: i32,
+        data_type: u32,
+        relative_offset: u32,
+    );
+
+    unsafe fn vertex_array_element_buffer(
+        &self,
+        vao: Self::VertexArray,
+        buffer: Option<Self::Buffer>,
+    );
+
+    unsafe fn vertex_array_vertex_buffer(
+        &self,
+        vao: Self::VertexArray,
+        binding_index: u32,
+        buffer: Option<Self::Buffer>,
+        offset: i32,
+        stride: i32,
+    );
 
     unsafe fn vertex_attrib_divisor(&self, index: u32, divisor: u32);
 
@@ -1142,6 +1247,8 @@ pub trait HasContext {
         element_type: u32,
         data: &[u8],
     );
+
+    unsafe fn max_shader_compiler_threads(&self, count: u32);
 }
 
 pub const ACTIVE_ATOMIC_COUNTER_BUFFERS: u32 = 0x92D9;
@@ -1454,6 +1561,8 @@ pub const COMPATIBLE_SUBROUTINES: u32 = 0x8E4B;
 
 pub const COMPILE_STATUS: u32 = 0x8B81;
 
+pub const COMPLETION_STATUS: u32 = 0x91B1;
+
 pub const COMPRESSED_R11_EAC: u32 = 0x9270;
 
 pub const COMPRESSED_RED: u32 = 0x8225;
@@ -1517,6 +1626,62 @@ pub const COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT: u32 = 0x8C4D;
 pub const COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT: u32 = 0x8C4E;
 
 pub const COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT: u32 = 0x8C4F;
+
+pub const COMPRESSED_RGBA_ASTC_4x4_KHR: u32 = 0x93B0;
+
+pub const COMPRESSED_RGBA_ASTC_5x4_KHR: u32 = 0x93B1;
+
+pub const COMPRESSED_RGBA_ASTC_5x5_KHR: u32 = 0x93B2;
+
+pub const COMPRESSED_RGBA_ASTC_6x5_KHR: u32 = 0x93B3;
+
+pub const COMPRESSED_RGBA_ASTC_6x6_KHR: u32 = 0x93B4;
+
+pub const COMPRESSED_RGBA_ASTC_8x5_KHR: u32 = 0x93B5;
+
+pub const COMPRESSED_RGBA_ASTC_8x6_KHR: u32 = 0x93B6;
+
+pub const COMPRESSED_RGBA_ASTC_8x8_KHR: u32 = 0x93B7;
+
+pub const COMPRESSED_RGBA_ASTC_10x5_KHR: u32 = 0x93B8;
+
+pub const COMPRESSED_RGBA_ASTC_10x6_KHR: u32 = 0x93B9;
+
+pub const COMPRESSED_RGBA_ASTC_10x8_KHR: u32 = 0x93BA;
+
+pub const COMPRESSED_RGBA_ASTC_10x10_KHR: u32 = 0x93BB;
+
+pub const COMPRESSED_RGBA_ASTC_12x10_KHR: u32 = 0x93BC;
+
+pub const COMPRESSED_RGBA_ASTC_12x12_KHR: u32 = 0x93BD;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR: u32 = 0x93D0;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR: u32 = 0x93D1;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR: u32 = 0x93D2;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR: u32 = 0x93D3;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR: u32 = 0x93D4;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR: u32 = 0x93D5;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR: u32 = 0x93D6;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR: u32 = 0x93D7;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR: u32 = 0x93D8;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR: u32 = 0x93D9;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR: u32 = 0x93DA;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR: u32 = 0x93DB;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR: u32 = 0x93DC;
+
+pub const COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR: u32 = 0x93DD;
 
 pub const COMPRESSED_TEXTURE_FORMATS: u32 = 0x86A3;
 
@@ -2433,6 +2598,8 @@ pub const MAX_SAMPLES: u32 = 0x8D57;
 pub const MAX_SAMPLE_MASK_WORDS: u32 = 0x8E59;
 
 pub const MAX_SERVER_WAIT_TIMEOUT: u32 = 0x9111;
+
+pub const MAX_SHADER_COMPILER_THREADS: u32 = 0x91B0;
 
 pub const MAX_SHADER_STORAGE_BLOCK_SIZE: u32 = 0x90DE;
 
